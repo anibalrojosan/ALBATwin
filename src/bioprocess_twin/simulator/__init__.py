@@ -1,6 +1,13 @@
 """Simulation orchestration utilities."""
 
+from bioprocess_twin.simulator.cstr_transport import (
+    cstr_dilution_rate_g_m3_d,
+    hrt_days,
+    q_m3_per_day_from_hrt_days,
+    q_m3_per_day_from_m3_per_hour,
+)
 from bioprocess_twin.simulator.liquid_ode_rhs import (
+    CstrContinuousConfig,
     LiquidOdeRhsProblem,
     evaluate_liquid_ode_rhs,
     make_liquid_rhs,
@@ -27,12 +34,17 @@ from bioprocess_twin.simulator.startup_batch import (
 __all__ = [
     "AlbaLiquidRhsResult",
     "BiomassConcentrations",
+    "CstrContinuousConfig",
     "EnvironmentalSnapshot",
     "LiquidOdeRhsProblem",
     "LiquidRhsDiagnostics",
+    "cstr_dilution_rate_g_m3_d",
     "evaluate_liquid_ode_rhs",
     "evaluate_liquid_rhs",
+    "hrt_days",
     "make_liquid_rhs",
+    "q_m3_per_day_from_hrt_days",
+    "q_m3_per_day_from_m3_per_hour",
     "state_vector_from_y",
     "StartupBatchProblem",
     "StartupBatchResult",
