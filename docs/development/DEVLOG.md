@@ -4,6 +4,8 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-05 - Sprint phase1-04c (A–C): CSTR transport, Stage 6 RHS, schedule-linked dilution](#devlog-20260505-p104c-abc)
+- [2026-05-02 - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)](#devlog-20260502-p104c-startup-batch)
 - [2026-04-30 - Sprint phase1-04b: ODE RHS wrapper (`evaluate_liquid_ode_rhs`, no transport)](#devlog-20260430-p104b-ode-rhs)
 - [2026-04-25 - Sprint phase1-04a prep: Fig. 1 daily forcing (T, PAR, evaporation)](#devlog-20260425-fig1-daily-forcing)
 - [2026-04-25 - ALBA Casagli et al. (2021) Article Review](#devlog-20260425-p103-alba-paper-reactor)
@@ -24,6 +26,53 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260505-p104c-abc"></a>
+
+## [2026-05-05] - Sprint phase1-04c (A–C): CSTR transport, Stage 6 RHS, schedule-linked dilution
+
+### Context & Goals
+
+Deliver the lumped **CSTR dilution** term for the **17-component SI** liquid state so it is **additive** to the Stage 6 kinetic RHS in **g m⁻³ d⁻¹**, split across **`phase1-04c-A`** (pure math), **`phase1-04c-B`** (ODE wiring), and **`phase1-04c-C`** (time-varying volumetric flow and optional influent composition on the **same daily clock** as `DielForcingSchedule` / `ForcingSample`). Deliberately **out of scope**: a single HRAP driver that couples **`startup_batch`** open-volume balance with continuous-flow dilution.
+
+### Technical Implementation
+
+- **`phase1-04c-A`:** Added `src/bioprocess_twin/simulator/cstr_transport.py` — NumPy-only helpers: dilution $(Q/V)(\mathbf{y}_\mathrm{in}-\mathbf{y})$, HRT $\tau=V/Q$, and **m³ h⁻¹ → m³ d⁻¹** via $\times 24$ (aligned with hour/day scaling elsewhere). Module narrative ties to `docs/theory/cstr_mass_balance_and_hrap_lumped_model.md`. Added `tests/unit/test_cstr_transport.py` with **no** import of `evaluate_liquid_rhs`.
+- **`phase1-04c-B`:** Introduced `CstrContinuousConfig` (single bundle for $V$, **m³ d⁻¹** $Q$, and SI $\mathbf{y}_\mathrm{in}$ / `StateVector`) and optional `LiquidOdeRhsProblem.cstr` defaulting to **`None`** so behaviour matches **`phase1-04b`** when unset. `evaluate_liquid_ode_rhs` adds `cstr_dilution_rate_g_m3_d` after `evaluate_liquid_rhs`; `make_liquid_rhs` inherits this path unchanged.
+- **`phase1-04c-C`:** Added `CstrScheduleFlowConfig` and alias `CstrTransportConfig = CstrContinuousConfig | CstrScheduleFlowConfig`. Flow rate follows **`ForcingSample.inflow_m3_h`** from the **same** `schedule.at(t_hours)` already used for kinetics (**one sample per RHS evaluation** for **T**, **PAR**, and **Q**). If `inflow_m3_h` is **`None`**, transport uses $Q=0$ (same semantics as constant config with zero flow). Optional **callable** influent $f(t_\mathrm{wrapped})$ with $t_\mathrm{wrapped}\in[0,24)$ for explicit **daily periodicity** under multi-day integration in absolute hours; CSV ingestion deferred.
+- **Design choices:** Use **m³ d⁻¹** for $Q$ and **m³** for $V$ so $Q/V$ is **d⁻¹**, matching `dcdt_g_m3_d` without mixed units. Variable $Q(t)$ reuses `DielForcingSchedule` optional drivers (constant or callable) instead of duplicating parallel series.
+- **Files touched:** 
+  - `src/bioprocess_twin/simulator/liquid_ode_rhs.py` (`CstrContinuousConfig`, `CstrScheduleFlowConfig`, `q_m3_per_d_from_forcing_sample`, `effective_y_in_schedule`, branching in `evaluate_liquid_ode_rhs`); 
+  - `src/bioprocess_twin/simulator/__init__.py` (public exports); 
+  - `tests/unit/test_liquid_ode_rhs.py` and `tests/unit/test_cstr_transport.py` for parity vs constant $Q$, $Q=0$, schedule vs continuous flow, callable influent decomposition, HRT checks.
+
+### 💡 Deep Dive: One forcing sample, two budgets
+
+Kinetics and dilution both consume **`DielForcingSchedule.at(t_hours)`**. Reusing that **`ForcingSample`** for `inflow_m3_h` guarantees **T**, **irradiance**, and **Q** stay **consistent at the same wrapped clock time**—important when `inflow_m3_h` is a callable of hour-of-day. The dilution term remains **$(Q/V)(\mathbf{y}_\mathrm{in}-\mathbf{y})$** in **g m⁻³ d⁻¹** per component conventions; only the **scalar** $Q$ (and optionally $\mathbf{y}_\mathrm{in}$) varies with the schedule.
+
+### Next Steps
+
+- **`phase1-04d`:** stiff-friendly time integrator driver and documented tolerances.
+- Optional later: unify **open-volume** `startup_batch` with **continuous-flow** dilution in one simulation product path if required.
+
+---
+
+<a id="devlog-20260502-p104c-startup-batch"></a>
+
+## [2026-05-02] - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)
+
+### Context & Goals
+Provide a **batch startup** path for the open HRABP-style pond: **variable volume** from **rain minus evaporation** (Fig. 1 / `ForcingSample`) and the lumped concentration correction $-(C_i/V)dV/dt$ with **no CSTR inflow** yet (phase1-04c). Scope is **SI layout only (17 states)**; **proton closure / 18th component** is deferred.
+
+### Technical Implementation
+- **`src/bioprocess_twin/simulator/startup_batch.py`:** `StartupBatchProblem` / `StartupBatchResult`, `evaluate_startup_batch_rhs`, `run_startup_batch` (`solve_ivp` LSODA, hours as time; ALBA rates converted **g m⁻³ d⁻¹ → g m⁻³ h⁻¹** via `/24`); nonnegative **clip** on `y` before `evaluate_liquid_ode_rhs` to satisfy `StateVector` bounds under numerical integration; optional `evaporation_floor_m3_h`; terminal event if `V` hits `volume_minimum_m3`.
+- **`default_reasonable_startup_y0`:** nominal rich-substrate + inoculum vector (not Casagli-calibrated).
+- **`tests/unit/test_startup_batch.py`:** parity when dV/dt=0, concentration-term scaling, volume decrease under evaporation, rain mm→m³ helper.
+
+### Next Steps
+- **phase1-04c:** add continuous-flow dilution; optionally unify time-base conventions with a shared integrator module (phase1-04d).
 
 ---
 
