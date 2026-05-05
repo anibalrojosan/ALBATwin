@@ -4,6 +4,7 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-02 - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)](#devlog-20260502-p104c-startup-batch)
 - [2026-04-30 - Sprint phase1-04b: ODE RHS wrapper (`evaluate_liquid_ode_rhs`, no transport)](#devlog-20260430-p104b-ode-rhs)
 - [2026-04-25 - Sprint phase1-04a prep: Fig. 1 daily forcing (T, PAR, evaporation)](#devlog-20260425-fig1-daily-forcing)
 - [2026-04-25 - ALBA Casagli et al. (2021) Article Review](#devlog-20260425-p103-alba-paper-reactor)
@@ -24,6 +25,23 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260502-p104c-startup-batch"></a>
+
+## [2026-05-02] - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)
+
+### Context & Goals
+Provide a **batch startup** path for the open HRABP-style pond: **variable volume** from **rain minus evaporation** (Fig. 1 / `ForcingSample`) and the lumped concentration correction $-(C_i/V)dV/dt$ with **no CSTR inflow** yet (phase1-04c). Scope is **SI layout only (17 states)**; **proton closure / 18th component** is deferred.
+
+### Technical Implementation
+- **`src/bioprocess_twin/simulator/startup_batch.py`:** `StartupBatchProblem` / `StartupBatchResult`, `evaluate_startup_batch_rhs`, `run_startup_batch` (`solve_ivp` LSODA, hours as time; ALBA rates converted **g m⁻³ d⁻¹ → g m⁻³ h⁻¹** via `/24`); nonnegative **clip** on `y` before `evaluate_liquid_ode_rhs` to satisfy `StateVector` bounds under numerical integration; optional `evaporation_floor_m3_h`; terminal event if `V` hits `volume_minimum_m3`.
+- **`default_reasonable_startup_y0`:** nominal rich-substrate + inoculum vector (not Casagli-calibrated).
+- **`tests/unit/test_startup_batch.py`:** parity when dV/dt=0, concentration-term scaling, volume decrease under evaporation, rain mm→m³ helper.
+
+### Next Steps
+- **phase1-04c:** add continuous-flow dilution; optionally unify time-base conventions with a shared integrator module (phase1-04d).
 
 ---
 
