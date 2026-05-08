@@ -4,6 +4,7 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-07 - Sprint phase1-04d: Time integration (`integrate_liquid_ode`, DenseOutput, Etapa A–C)](#devlog-20260507-p104d-integrator)
 - [2026-05-05 - Sprint phase1-04c (A–C): CSTR transport, Stage 6 RHS, schedule-linked dilution](#devlog-20260505-p104c-abc)
 - [2026-05-02 - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)](#devlog-20260502-p104c-startup-batch)
 - [2026-04-30 - Sprint phase1-04b: ODE RHS wrapper (`evaluate_liquid_ode_rhs`, no transport)](#devlog-20260430-p104b-ode-rhs)
@@ -26,6 +27,34 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260507-p104d-integrator"></a>
+
+## [2026-05-07] - Sprint phase1-04d: Time integration (`integrate_liquid_ode`, DenseOutput, Etapa A–C)
+
+### Context & Goals
+
+Close **phase1-04d** by wiring **`scipy.integrate.solve_ivp`** to the **17-component** liquid RHS from **`phase1-04b`** / **`phase1-04c`** (`evaluate_liquid_ode_rhs`), with a **stiff-friendly** default (**LSODA**), documented **tolerances**, **`max_step`** in **hours**, optional **dense output** for sampling, and operator-facing **troubleshooting**. Keep the **algebraic pH** closure **nested** inside Stage 6 (DAE index-1 reduction)—no separate DAE driver for acceptance.
+
+### Technical Implementation
+
+- **`src/bioprocess_twin/core/simulation.py`:** `integrate_liquid_ode` uses **elapsed time in hours**; RHS rates from `evaluate_liquid_ode_rhs` are **g m⁻³ d⁻¹** and are divided by **24** to match **per-hour** derivatives (same scaling rule as `startup_batch.run_startup_batch`). Optional **nonnegative clip** on `y` before RHS calls. Defaults: **LSODA**, `rtol`/`atol`, `max_step`, optional **`dense_output`**, optional **`return_ode_result`** to attach the raw SciPy object, optional **`first_step`** (hours) forwarded to `solve_ivp` when set.
+- **`LiquidIntegrationResult`:** `t_hours`, `y` with shape `(n, N_STATE)`, `success`, `message`, optional **`ode_result`**.
+- **`interpolate_liquid_trajectory`:** samples `ode_result.sol(t)` on **[sol.t_min, sol.t_max]** when dense output was enabled; raises with clear errors if dense solution or raw result is missing.
+- **Tests:** `tests/unit/test_liquid_ode_integration_etapa_a.py` (baseline integration, Euler short-step check, multi-day clock wrap); `tests/unit/test_liquid_ode_integration_etapa_b.py` (rtol/atol vs endpoint, `max_step` vs `nfev`, dense endpoints, stability horizon); `tests/unit/test_liquid_ode_integration_etapa_c.py` (**coarse vs fine `t_eval`** same terminal state, interpolation parity vs SciPy, domain validation, `first_step` smoke).
+- **`src/bioprocess_twin/core/__init__.py`:** lazy **`__getattr__`** exports avoid circular imports when importing `core.state` before simulation symbols (`integrate_liquid_ode`, `interpolate_liquid_trajectory`).
+- **Documentation:** [`docs/SIMULATOR.md`](../SIMULATOR.md) — architecture overview, module table, **mermaid** data-flow diagram, units/time-base notes, DenseOutput guidance, **Troubleshooting** table aligned with code docstrings.
+
+### Deep Dive: Why divide by 24?
+
+ALBA kinetic exports from Stage 6 are naturally expressed **per day** (`dcdt_g_m3_d`). The integrator’s independent variable is **hours** of simulated clock/elapsed time. Converting **d⁻¹ → h⁻¹** for `solve_ivp` keeps one coherent time axis without silently re-parameterizing the forcing schedule.
+
+### Next Steps
+
+- **`phase1-04e`:** Beer–Lambert depth integration and effective irradiance into `EnvConditions` using surface \(I_0(t)\) from forcing plus state-linked optics (e.g. TSS).
+- **`phase1-04f`:** 24 h end-to-end run, export hooks, mass-balance checks in CI as per sprint.
 
 ---
 
@@ -54,7 +83,7 @@ Kinetics and dilution both consume **`DielForcingSchedule.at(t_hours)`**. Reusin
 
 ### Next Steps
 
-- **`phase1-04d`:** stiff-friendly time integrator driver and documented tolerances.
+- **`phase1-04e`:** Beer–Lambert effective irradiance and coupling with diel \(I_0(t)\).
 - Optional later: unify **open-volume** `startup_batch` with **continuous-flow** dilution in one simulation product path if required.
 
 ---
@@ -324,7 +353,7 @@ Due to the complexity of the Hydrochemistry module, I split the implementation i
      - *Tests:* light integration reusing Stage 3–4 numerics through project types.
 - **Stage 6 — ODE hook-up:** 
      - Place $\rho_{20}$–$\rho_{22}$ in $\mathrm{d}\mathbf{C}/\mathrm{d}t$ when the $S$ / RHS design is ready; 
-     - verify signs and mass sense on $S_\mathrm
+     - verify signs and mass sense.
 
 ### 💡 Deep Dive: Why a separate HydroChemistry narrative
 The SSOT is optimized for **implementation lookup**; newcomers need a **single storyline** from control volume → $\mathbf{S}^\top\boldsymbol{\rho}$ → totals vs species → electroneutrality → nested Newton inside the ODE RHS. Centralizing that narrative reduces duplication in issues and onboarding without changing stoichiometric norms.

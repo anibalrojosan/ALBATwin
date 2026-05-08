@@ -21,7 +21,14 @@ ode_result.sol so you can evaluate the state at extra times without re-integrati
 If dense_output=False, ode_result.sol is None even when return_ode_result=True.
 
 Downstream quantities (kinetic rates, env snapshots) are not stored on the SciPy
-result; evaluate evaluate_liquid_rhs / schedules at (t, y) as needed.
+result; call evaluate_liquid_rhs / schedules at (t, y) as needed.
+
+**Troubleshooting (integrator fails or success=False):**
+- Read message on LiquidIntegrationResult and inspect SciPy ode_result.message if attached.
+- Verify evaluate_liquid_ode_rhs(t0, y0, problem) is finite (no NaN/Inf) at the start.
+- Reduce max_step (hours); increase rtol/atol only if you accept looser error control.
+- Try method="BDF" for stiff behavior; optional first_step (hours) to limit the first internal step.
+- Remember schedule.at wraps time modulo 24 h; check callables for sharp transitions at day boundaries.
 """
 
 from __future__ import annotations
@@ -67,6 +74,55 @@ class LiquidIntegrationResult:
     """Raw solve_ivp result when requested; use .sol(t) if dense_output was True."""
 
 
+def interpolate_liquid_trajectory(result: LiquidIntegrationResult, t_hours: np.ndarray) -> np.ndarray:
+    """
+    Interpolate the liquid state at query times using SciPy's dense solution.
+
+    Requires integrate_liquid_ode(..., dense_output=True, return_ode_result=True).
+    Query times must lie within the interpolant's domain [sol.t_min, sol.t_max]
+    (integration interval), typically matching t_span_hours.
+
+    Parameters
+    ----------
+    result
+        Integration result carrying ode_result.sol.
+    t_hours
+        Query times [h], shape (m,) or scalar coercible to float.
+
+    Returns
+    -------
+    numpy.ndarray
+        State samples of shape (m, N_STATE) (or (1, N_STATE) for a scalar time).
+    """
+    if result.ode_result is None:
+        raise ValueError("interpolate_liquid_trajectory requires return_ode_result=True on integrate_liquid_ode")
+    sol_dense = result.ode_result.sol
+    if sol_dense is None:
+        raise ValueError(
+            "interpolate_liquid_trajectory requires dense_output=True; ode_result.sol is None",
+        )
+
+    t_q = np.asarray(t_hours, dtype=np.float64).ravel()
+    if t_q.size == 0:
+        raise ValueError("t_hours must be non-empty")
+
+    t_min = float(sol_dense.t_min)
+    t_max = float(sol_dense.t_max)
+    eps = 1e-12
+    if np.any(t_q < t_min - eps) or np.any(t_q > t_max + eps):
+        raise ValueError(
+            f"query times must lie within [{t_min}, {t_max}] hours (interpolant domain); "
+            f"got min {float(np.min(t_q)):.6g}, max {float(np.max(t_q)):.6g}",
+        )
+
+    raw = sol_dense(t_q)
+    mat = np.asarray(raw, dtype=np.float64)
+    if mat.ndim == 1:
+        return mat.reshape(1, -1)
+    # SciPy: shape (N_STATE, m)
+    return mat.T
+
+
 def integrate_liquid_ode(
     problem: LiquidOdeRhsProblem,
     y0: StateVector | np.ndarray,
@@ -80,6 +136,7 @@ def integrate_liquid_ode(
     clip_nonnegative: bool = True,
     dense_output: bool = False,
     return_ode_result: bool = False,
+    first_step: float | None = None,
 ) -> LiquidIntegrationResult:
     """
     Integrate dy/dt for the Stage-6 liquid path + optional CSTR transport.
@@ -116,11 +173,17 @@ def integrate_liquid_ode(
     return_ode_result
         If True, attach the raw SciPy object from solve_ivp as LiquidIntegrationResult.ode_result
         (optional inspection, dense sampling via ode_result.sol(t) when dense_output is True).
+    first_step
+        Optional suggested first integration step in hours; forwarded to solve_ivp when set.
 
     Returns
     -------
     LiquidIntegrationResult
         Trajectory samples, integrator status message, and optionally the SciPy result object.
+
+    Notes
+    -----
+    See the module docstring for troubleshooting when integration fails.
     """
     y0_arr = _as_length_n_state_y0(y0)
     t0, t1 = float(t_span_hours[0]), float(t_span_hours[1])
@@ -140,16 +203,22 @@ def integrate_liquid_ode(
     else:
         te = np.asarray(t_eval, dtype=np.float64)
 
+    ivp_kwargs: dict[str, Any] = {
+        "method": method,
+        "t_eval": te,
+        "rtol": rtol,
+        "atol": atol,
+        "max_step": max_step,
+        "dense_output": dense_output,
+    }
+    if first_step is not None:
+        ivp_kwargs["first_step"] = float(first_step)
+
     sol = solve_ivp(
         rhs,
         (t0, t1),
         y0_arr,
-        method=method,
-        t_eval=te,
-        rtol=rtol,
-        atol=atol,
-        max_step=max_step,
-        dense_output=dense_output,
+        **ivp_kwargs,
     )
 
     raw = sol if return_ode_result else None
@@ -174,4 +243,4 @@ def integrate_liquid_ode(
     )
 
 
-__all__ = ["LiquidIntegrationResult", "integrate_liquid_ode"]
+__all__ = ["LiquidIntegrationResult", "integrate_liquid_ode", "interpolate_liquid_trajectory"]
