@@ -1,8 +1,33 @@
-"""Short-horizon time integration for the 17-component liquid ODE (phase1-04d Etapa A)."""
+"""Time integration for the 17-component liquid ODE (phase1-04d).
+
+Independent variable for solve_ivp is elapsed time in hours. Forcing uses
+LiquidOdeRhsProblem.schedule.at(t_hours), which maps clock time modulo 24 h.
+
+Rates from evaluate_liquid_ode_rhs are expressed per day (g m⁻³ d⁻¹). They are
+divided by 24 before integration so that derivatives match per hour, consistent
+with bioprocess_twin.simulator.startup_batch.run_startup_batch.
+
+**Solver choice:** default method="LSODA" switches between Adams and BDF and handles
+many stiff biotech systems. For strongly stiff problems you can pass method="BDF"
+(implicit, may benefit from an analytic Jacobian in future work).
+
+**Tolerances:** rtol and atol are passed to SciPy in the usual relative/absolute
+sense for the state vector. max_step is a cap on the integrator step in hours
+(not the spacing of t_eval output).
+
+**t_eval vs dense output:** t_eval selects output times; it does not force the
+internal step size. With dense_output=True, SciPy builds a piecewise interpolant
+ode_result.sol so you can evaluate the state at extra times without re-integrating.
+If dense_output=False, ode_result.sol is None even when return_ode_result=True.
+
+Downstream quantities (kinetic rates, env snapshots) are not stored on the SciPy
+result; evaluate evaluate_liquid_rhs / schedules at (t, y) as needed.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -38,6 +63,9 @@ class LiquidIntegrationResult:
     success: bool
     message: str
 
+    ode_result: Any | None = None
+    """Raw solve_ivp result when requested; use .sol(t) if dense_output was True."""
+
 
 def integrate_liquid_ode(
     problem: LiquidOdeRhsProblem,
@@ -51,38 +79,48 @@ def integrate_liquid_ode(
     max_step: float | None = 6.0,
     clip_nonnegative: bool = True,
     dense_output: bool = False,
+    return_ode_result: bool = False,
 ) -> LiquidIntegrationResult:
     """
     Integrate dy/dt for the Stage-6 liquid path + optional CSTR transport.
 
-    Independent variable is "elapsed time in hours". Forcing uses
-    `problem.schedule.at(t)`, which wraps clock time modulo 24 h (repeating diel).
+    Independent variable is elapsed time in hours. Forcing uses
+    problem.schedule.at(t), which wraps clock time modulo 24 h (repeating diel).
 
-    Rates from `evaluate_liquid_ode_rhs` are per day (g m⁻³ d⁻¹); they are
-    converted to per hour by dividing by 24 so that `solve_ivp` is consistent
-    with `t` in hours (same convention as `startup_batch.run_startup_batch`).
+    Rates from evaluate_liquid_ode_rhs are per day (g m⁻³ d⁻¹); they are
+    converted to per hour by dividing by 24 so that solve_ivp is consistent
+    with t in hours (same convention as startup_batch.run_startup_batch).
 
     Parameters
     ----------
     problem
         Bundles schedule, kinetic options, and optional CSTR config.
     y0
-        Initial SI state vector (length `N_STATE`).
+        Initial SI state vector (length N_STATE).
     t_span_hours
-        `(t_start, t_end)` integration window [h].
+        (t_start, t_end) integration window [h].
     t_eval
-        Times at which to store the solution. If `None`, uses an hourly-ish grid
-        on `[t_span_hours[0], t_span_hours[1]]` with at least two points.
+        Times at which to store the solution. If None, uses an hourly-ish grid
+        on ``[t_span_hours[0], t_span_hours[1]]`` with at least two points.
+    method
+        SciPy ODE method (default LSODA). Use BDF for stiff systems if needed.
+    rtol, atol
+        Relative and absolute tolerances for the state vector (SciPy semantics).
+    max_step
+        Maximum integrator step size in hours (None means no cap).
     clip_nonnegative
-        If True (default), clip concentrations to `>= 0` before each RHS evaluation
+        If True (default), clip concentrations to >= 0 before each RHS evaluation
         (integrators may produce slightly negative intermediates).
     dense_output
-        Passed through to ``solve_ivp`` (Etapa B may rely on dense output sampling).
+        If True, SciPy retains a dense interpolant on ode_result.sol (when returned).
+    return_ode_result
+        If True, attach the raw SciPy object from solve_ivp as LiquidIntegrationResult.ode_result
+        (optional inspection, dense sampling via ode_result.sol(t) when dense_output is True).
 
     Returns
     -------
     LiquidIntegrationResult
-        Trajectory samples and integrator status message.
+        Trajectory samples, integrator status message, and optionally the SciPy result object.
     """
     y0_arr = _as_length_n_state_y0(y0)
     t0, t1 = float(t_span_hours[0]), float(t_span_hours[1])
@@ -114,12 +152,15 @@ def integrate_liquid_ode(
         dense_output=dense_output,
     )
 
+    raw = sol if return_ode_result else None
+
     if sol.t.size == 0:
         return LiquidIntegrationResult(
             t_hours=np.array([t0]),
             y=y0_arr.reshape(1, -1),
             success=False,
             message=sol.message or "integrator returned empty time grid",
+            ode_result=raw,
         )
 
     y_out = np.asarray(sol.y.T, dtype=np.float64)
@@ -129,6 +170,7 @@ def integrate_liquid_ode(
         y=y_out,
         success=bool(sol.success),
         message=msg,
+        ode_result=raw,
     )
 
 
