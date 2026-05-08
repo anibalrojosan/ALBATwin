@@ -54,3 +54,6 @@ Thumbs.db
 
 # --- Coverage ---
 .coverage
+
+# --- Local experiment outputs ---
+scripts/experiments/output/

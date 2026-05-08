@@ -45,6 +45,10 @@ flowchart TD
 | **Integrator** | [`core/simulation.py`](../src/bioprocess_twin/core/simulation.py) | Hours-based `solve_ivp`; rates **÷24** (day⁻¹ → hour⁻¹) |
 | Startup batch | [`simulator/startup_batch.py`](../src/bioprocess_twin/simulator/startup_batch.py) | 17 states + volume ODE; same **÷24** convention |
 
+## Reproducible startup experiment (script)
+
+- **[`scripts/experiments/run_startup_batch_3day.py`](../scripts/experiments/run_startup_batch_3day.py)** — Three-day (default), hourly-sampled `run_startup_batch` run: writes `trajectory.csv` (SI columns + volume) and `experiment_summary.md`. **Solver timing:** `StartupIntegrationMetadata.solver_wall_time_s` is wall time for the single `solve_ivp` call only; the summary’s **estimated seconds per output sample** is total divided by the number of rows (**indicative**, not per internal integrator step).
+
 ## Units and time bases
 
 - **Integration clock:** `integrate_liquid_ode` uses **elapsed time in hours**. Forcing samples use **`problem.schedule.at(t_hours)`**, which maps to a repeating **daily** cycle internally.

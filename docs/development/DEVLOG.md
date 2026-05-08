@@ -4,6 +4,7 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-08 - Sprint phase1-04f: Startup batch 3-day experiment script and integration metadata](#devlog-20260508-p104f-startup-experiment)
 - [2026-05-08 - Sprint phase1-04e: Beer–Lambert and effective PAR (TSS proxy)](#devlog-20260508-p104e-beer-lambert)
 - [2026-05-07 - Sprint phase1-04d: Time integration (`integrate_liquid_ode`, DenseOutput, Etapa A–C)](#devlog-20260507-p104d-integrator)
 - [2026-05-05 - Sprint phase1-04c (A–C): CSTR transport, Stage 6 RHS, schedule-linked dilution](#devlog-20260505-p104c-abc)
@@ -28,6 +29,32 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260508-p104f-startup-experiment"></a>
+
+## [2026-05-08] - Startup batch 3-day experiment script and integration metadata
+
+### Context & Goals
+
+Provide a **reproducible first smoke experiment**: open-pond **startup batch** (17 SI states + volume), **hourly** output for three simulated days, **CSV** trajectory, and a **Markdown** summary for quick inspection. Align reporting with the agreed timing policy: **only total wall time** inside `solve_ivp`; **estimated seconds per output sample** (total / $n$ rows) is **indicative**, not per-internal-step CPU.
+
+### Technical Implementation
+
+- **`src/bioprocess_twin/simulator/startup_batch.py`:** `StartupIntegrationMetadata` dataclass; `run_startup_batch(..., return_integration_metadata=True)` returns `(StartupBatchResult, StartupIntegrationMetadata)` with `solver_wall_time_s` measured around `solve_ivp`, plus `nfev` / `njev` when SciPy exposes them.
+- **`src/bioprocess_twin/experiments/`:** `hourly_t_eval_for_startup_days`, `trajectory_to_dataframe`, `SI_STATE_COLUMNS` for script/tests.
+- **`scripts/experiments/run_startup_batch_3day.py`:** CLI (season, geometry, `--plots`); writes `trajectory.csv`, `experiment_summary.md`, optional PNG panels.
+- **`tests/unit/test_startup_batch_export.py`** and **`test_run_startup_batch_integration_metadata`** in **`tests/unit/test_startup_batch.py`**.
+- **`docs/SIMULATOR.md`:** pointer to the script and timing semantics.
+
+### 💡 Deep Dive: Why only total solver time
+
+SciPy `solve_ivp` does not expose per-output-time CPU cost for a single run; splitting into hourly IVPs would change step control. The summary therefore records **one** `solver_wall_time_s` and an **average** over rows **only** as a rough scaling estimate.
+
+### Next Steps
+
+- Extend toward **phase1-04f** (export API, 24 h liquid-path E2E, mass-balance checks in CI) using the same CSV column naming.
 
 ---
 

@@ -22,6 +22,8 @@ Only 17-component SI layout; proton closure / 18th state is out of scope.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
+from typing import Literal, overload
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -134,6 +136,26 @@ class StartupBatchResult:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class StartupIntegrationMetadata:
+    """Wall-clock and SciPy counters for one ``run_startup_batch`` ``solve_ivp`` call."""
+
+    solver_wall_time_s: float
+    """Elapsed wall time spent inside ``solve_ivp`` only."""
+
+    n_output_points: int
+    """Length of the returned time grid (``len(t_hours)``)."""
+
+    nfev: int
+    """Number of RHS evaluations reported by SciPy (0 if unavailable)."""
+
+    njev: int | None
+    """Jacobian evaluations if reported by SciPy; else ``None``."""
+
+    success: bool
+    message: str
+
+
 def evaluate_startup_batch_rhs(
     t_hours: float,
     z: np.ndarray,
@@ -215,6 +237,7 @@ def default_reasonable_startup_y0() -> np.ndarray:
     return st.to_array(variant=StateVectorVariant.SI)
 
 
+@overload
 def run_startup_batch(
     cfg: StartupBatchProblem,
     *,
@@ -223,11 +246,40 @@ def run_startup_batch(
     atol: float = 1e-9,
     max_step: float | None = 6.0,
     t_eval_hours: np.ndarray | None = None,
-) -> StartupBatchResult:
+    return_integration_metadata: Literal[False] = False,
+) -> StartupBatchResult: ...
+
+
+@overload
+def run_startup_batch(
+    cfg: StartupBatchProblem,
+    *,
+    method: str = "LSODA",
+    rtol: float = 1e-6,
+    atol: float = 1e-9,
+    max_step: float | None = 6.0,
+    t_eval_hours: np.ndarray | None = None,
+    return_integration_metadata: Literal[True],
+) -> tuple[StartupBatchResult, StartupIntegrationMetadata]: ...
+
+
+def run_startup_batch(
+    cfg: StartupBatchProblem,
+    *,
+    method: str = "LSODA",
+    rtol: float = 1e-6,
+    atol: float = 1e-9,
+    max_step: float | None = 6.0,
+    t_eval_hours: np.ndarray | None = None,
+    return_integration_metadata: bool = False,
+) -> StartupBatchResult | tuple[StartupBatchResult, StartupIntegrationMetadata]:
     """
     Integrate startup batch (SI + volume) from t=0 to t = startup_days * 24 h.
 
     If t_eval_hours is None, samples every hour on [0, startup_days * 24].
+
+    If ``return_integration_metadata`` is True, returns ``(result, metadata)`` where
+    ``metadata.solver_wall_time_s`` covers only the ``solve_ivp`` call.
     """
     y0 = _as_length17_ndarray(cfg.y0)
     t_end = float(cfg.startup_days) * _HOURS_PER_DAY
@@ -250,6 +302,7 @@ def run_startup_batch(
     else:
         t_eval = np.asarray(t_eval_hours, dtype=np.float64)
 
+    t_ivp0 = perf_counter()
     sol = solve_ivp(
         rhs,
         (0.0, t_end),
@@ -261,25 +314,50 @@ def run_startup_batch(
         max_step=max_step,
         events=event_volume,
     )
+    solver_wall_time_s = perf_counter() - t_ivp0
+
+    nfev = int(getattr(sol, "nfev", 0))
+    njev_raw = getattr(sol, "njev", None)
+    njev = int(njev_raw) if njev_raw is not None else None
+
+    def _meta(ok: bool, msg: str, n_out: int) -> StartupIntegrationMetadata:
+        return StartupIntegrationMetadata(
+            solver_wall_time_s=float(solver_wall_time_s),
+            n_output_points=int(n_out),
+            nfev=nfev,
+            njev=njev,
+            success=ok,
+            message=msg,
+        )
 
     if sol.t.size == 0:
-        return StartupBatchResult(
+        res = StartupBatchResult(
             t_hours=np.array([0.0]),
             y=y0.reshape(1, -1),
             volume_m3=np.array([float(cfg.volume_m3_initial)]),
             success=False,
             message="integrator returned empty time grid",
         )
+        meta = _meta(False, res.message, 0)
+        if return_integration_metadata:
+            return res, meta
+        return res
 
     y_traj = sol.y[:N_STATE].T
     v_traj = sol.y[_VOLUME_INDEX]
     msg = sol.message or ""
     ok = bool(sol.success)
+    th = np.asarray(sol.t, dtype=np.float64)
 
-    return StartupBatchResult(
-        t_hours=np.asarray(sol.t, dtype=np.float64),
+    res = StartupBatchResult(
+        t_hours=th,
         y=np.asarray(y_traj, dtype=np.float64),
         volume_m3=np.asarray(v_traj, dtype=np.float64),
         success=ok,
         message=msg,
     )
+    meta = _meta(ok, msg, int(th.size))
+
+    if return_integration_metadata:
+        return res, meta
+    return res

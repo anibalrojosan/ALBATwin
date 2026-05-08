@@ -33,6 +33,7 @@ from bioprocess_twin.simulator.liquid_rhs import (
 from bioprocess_twin.simulator.startup_batch import (
     StartupBatchProblem,
     StartupBatchResult,
+    StartupIntegrationMetadata,
     default_reasonable_startup_y0,
     evaluate_startup_batch_rhs,
     evaporation_rate_m3_h,
@@ -66,6 +67,7 @@ __all__ = [
     "state_vector_from_y",
     "StartupBatchProblem",
     "StartupBatchResult",
+    "StartupIntegrationMetadata",
     "default_reasonable_startup_y0",
     "evaluate_startup_batch_rhs",
     "evaporation_rate_m3_h",

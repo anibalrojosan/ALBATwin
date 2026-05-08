@@ -12,6 +12,7 @@ from bioprocess_twin.models.stoichiometry import N_STATE
 from bioprocess_twin.simulator import LiquidOdeRhsProblem, evaluate_liquid_ode_rhs
 from bioprocess_twin.simulator.startup_batch import (
     StartupBatchProblem,
+    StartupIntegrationMetadata,
     default_reasonable_startup_y0,
     evaluate_startup_batch_rhs,
     evaporation_rate_m3_h,
@@ -176,3 +177,24 @@ def test_default_reasonable_startup_y0_length_and_nonneg() -> None:
     assert y.shape == (N_STATE,)
     assert np.all(y >= 0.0)
     StateVector.from_array(y, variant=StateVectorVariant.SI)
+
+
+def test_run_startup_batch_integration_metadata() -> None:
+    """``return_integration_metadata=True`` yields timing + SciPy counters."""
+    y = default_reasonable_startup_y0()
+    schedule = DielForcingSchedule(season="summer", evaporation_m3_h=0.0, rain_mm_h=0.0)
+    problem = LiquidOdeRhsProblem(schedule=schedule)
+    cfg = StartupBatchProblem(
+        problem=problem,
+        startup_days=0.05,
+        y0=y,
+        volume_m3_initial=50.0,
+        surface_area_m2=56.0,
+        include_rain=False,
+    )
+    t_eval = np.linspace(0.0, cfg.startup_days * 24.0, 4)
+    res, meta = run_startup_batch(cfg, t_eval_hours=t_eval, return_integration_metadata=True)
+    assert isinstance(meta, StartupIntegrationMetadata)
+    assert meta.n_output_points == res.t_hours.size == 4
+    assert meta.solver_wall_time_s >= 0.0
+    assert meta.nfev >= 0
