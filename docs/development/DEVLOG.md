@@ -4,6 +4,7 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-08 - Sprint phase1-04e: Beer–Lambert and effective PAR (TSS proxy)](#devlog-20260508-p104e-beer-lambert)
 - [2026-05-07 - Sprint phase1-04d: Time integration (`integrate_liquid_ode`, DenseOutput, Etapa A–C)](#devlog-20260507-p104d-integrator)
 - [2026-05-05 - Sprint phase1-04c (A–C): CSTR transport, Stage 6 RHS, schedule-linked dilution](#devlog-20260505-p104c-abc)
 - [2026-05-02 - Sprint phase1-04c: Startup batch integration (SI 17 + evaporation / volume ODE)](#devlog-20260502-p104c-startup-batch)
@@ -27,6 +28,38 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260508-p104e-beer-lambert"></a>
+
+## [2026-05-08] - Sprint phase1-04e: Beer–Lambert and effective PAR (TSS proxy)
+
+### Context & Goals
+
+Close **phase1-04e** by coupling surface PAR from **`DielForcingSchedule`** to a **depth-averaged** irradiance scalar in **`EnvConditions.irradiance_umol_m2_s`**, using **Beer–Lambert** attenuation with algal biomass $X_{\mathrm{ALG}}$ and **`epsilon_light`** ($\varepsilon$ in m² gCOD⁻¹ per **MATH_MODEL**). Align with supplemental material **SI 1.2** via the documented **TSS proxy** $X_{\mathrm{ALG}}/1.57$ while implementing extinction as $\kappa = \varepsilon\,X_{\mathrm{ALG}}$ [m⁻¹] so one coefficient matches the table without unit ambiguity.
+
+### Technical Implementation
+
+- **`src/bioprocess_twin/simulator/beer_lambert.py`:** `COD_TO_TSS_ALG = 1.57`; `tss_proxy_g_m3_from_state`; `depth_averaged_irradiance_umol_m2_s` ($\bar{I} = I_0 (1-e^{-\kappa h})/(\kappa h)$ with $\kappa\to 0$ limit); `env_irradiance_umol_m2_s`.
+- **`LiquidOdeRhsProblem.mixed_layer_depth_m`:** optional [m]; when set, **`evaluate_liquid_ode_rhs`** builds **`EnvConditions`** with depth-averaged PAR from **`schedule.at`** surface $I_0$, **`epsilon_light`**, and **`StateVector.X_ALG`**; otherwise the unchanged **`to_env_conditions`** path.
+- **`src/bioprocess_twin/simulator/__init__.py`:** exports for Beer–Lambert helpers.
+- **Docs:** **`docs/MATH_MODEL.md`** — coupling paragraph ($I_0$ vs $\bar{I}$, $\kappa$, proxy); **`docs/SIMULATOR.md`** — scope and module table row for **`beer_lambert.py`**.
+- **Tests:** **`tests/unit/test_beer_lambert.py`** — proxy, limits, RHS with/without mixed depth.
+
+### 💡 Deep Dive: Depth-averaged PAR in a mixed layer
+
+For a **well-mixed** layer of thickness $h$, the depth average of $I(z)=I_0 e^{-\kappa z}$ is $\bar{I} = \frac{I_0}{h}\int_0^h e^{-\kappa z}\,\mathrm{d}z = I_0 (1-e^{-\kappa h})/(\kappa h)$, matching surface $I_0$ when $\kappa\to 0$. **Kinetics** still receive a **single scalar** $I$ per RHS evaluation (consistent with the lumped liquid formulation) while optics respond to **instantaneous** $X_{\mathrm{ALG}}$.
+
+### Alternative TSS estimation approaches that can be used in the future (not implemented yet)
+
+- **Option 2:** Sum particulate contributions from **multiple** modeled solids with **COD → dry mass** factors per compartment when literature supports them.
+- **Option 3:** **External** or **campaign** TSS (CSV, calibrated scalar, or prescribed series) when the algal-only proxy is insufficient or for controlled experiments.
+
+### Next Steps
+
+- **`phase1-04f`:** Export hooks, ~24 h end-to-end run, mass-balance checks in CI per sprint.
+- Optional later: richer optics (e.g. **OD₆₈₀** as state or forcing) if data justify extending beyond the algal proxy.
 
 ---
 

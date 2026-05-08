@@ -1,5 +1,11 @@
 """Simulation orchestration utilities."""
 
+from bioprocess_twin.simulator.beer_lambert import (
+    COD_TO_TSS_ALG,
+    depth_averaged_irradiance_umol_m2_s,
+    env_irradiance_umol_m2_s,
+    tss_proxy_g_m3_from_state,
+)
 from bioprocess_twin.simulator.cstr_transport import (
     cstr_dilution_rate_g_m3_d,
     hrt_days,
@@ -36,6 +42,7 @@ from bioprocess_twin.simulator.startup_batch import (
 )
 
 __all__ = [
+    "COD_TO_TSS_ALG",
     "AlbaLiquidRhsResult",
     "BiomassConcentrations",
     "CstrContinuousConfig",
@@ -44,6 +51,9 @@ __all__ = [
     "EnvironmentalSnapshot",
     "LiquidOdeRhsProblem",
     "LiquidRhsDiagnostics",
+    "depth_averaged_irradiance_umol_m2_s",
+    "env_irradiance_umol_m2_s",
+    "tss_proxy_g_m3_from_state",
     "cstr_dilution_rate_g_m3_d",
     "effective_y_in_schedule",
     "evaluate_liquid_ode_rhs",

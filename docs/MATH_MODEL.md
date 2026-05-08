@@ -121,6 +121,8 @@ Uncertainty (±) is included when reported in SI.5. **Source** abbreviations fol
 | $K_{NO2,NOB}$ | 0.5 | $gN \cdot m^{-3}$ | Nitrite half-saturation for $X_{NOB}$ | Reichert, 2001 |
 | $K_{P,NOB}$ | 0.01 | $gP \cdot m^{-3}$ | Phosphorus half-saturation for $X_{NOB}$ | Henze, 2000 |
 
+**Simulator coupling — depth-averaged PAR (phase1-04e).** Kinetics consume a single scalar `irradiance_umol_m2_s` in `EnvConditions`. When `LiquidOdeRhsProblem.mixed_layer_depth_m` is set [m], the code replaces surface PAR $I_0(t)$ from forcing with the depth-averaged value $\bar{I} = I_0\,(1-e^{-\kappa h})/(\kappa h)$ over a well-mixed layer of thickness $h$, with $\kappa = \varepsilon\,X_{ALG}$ [m⁻¹] and $\varepsilon$ the table coefficient [m² gCOD⁻¹] (`epsilon_light`). For $\kappa \to 0$, $\bar{I} \to I_0$. SI 1.2 gives $\mathrm{TSS} \approx X_{ALG}/1.57$ [g m⁻³] as an algal suspension proxy; the implementation uses $\kappa = \varepsilon_{\mathrm{COD}} X_{ALG}$, equivalent to pairing $\varepsilon_{\mathrm{TSS}}$ with that TSS when $\varepsilon_{\mathrm{TSS}} = \varepsilon_{\mathrm{COD}}\cdot 1.57$.
+
 #### 1.2.3 Temperature coefficients
 
 Used in $\theta^{(T-20)}$-style corrections where §3–§4 apply (decay, hydrolysis, ammonification, gas-transfer scaling in SI.7). The first row ($\theta$ = 1.024) is the factor cited for $k_La$ temperature correction in SI.5 / SI.7.

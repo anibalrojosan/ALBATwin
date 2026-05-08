@@ -4,7 +4,7 @@ This document describes how the **lumped liquid simulation** is wired in this re
 
 ## Scope
 
-- **In scope here:** SI **17-component** liquid state, liquid RHS **`evaluate_liquid_rhs`** (Stage 6 — rates placed in **dC/dt** after Stages 1–5), ODE wrapper **`evaluate_liquid_ode_rhs`**, optional CSTR transport, diel forcing (`DielForcingSchedule`), and **`solve_ivp`** integration in [`src/bioprocess_twin/core/simulation.py`](../src/bioprocess_twin/core/simulation.py).
+- **In scope here:** SI **17-component** liquid state, liquid RHS **`evaluate_liquid_rhs`** (Stage 6 — rates placed in **dC/dt** after Stages 1–5), ODE wrapper **`evaluate_liquid_ode_rhs`**, optional **Beer–Lambert** depth-averaged PAR when **`mixed_layer_depth_m`** is set ([`simulator/beer_lambert.py`](../src/bioprocess_twin/simulator/beer_lambert.py)), optional CSTR transport, diel forcing (`DielForcingSchedule`), and **`solve_ivp`** integration in [`src/bioprocess_twin/core/simulation.py`](../src/bioprocess_twin/core/simulation.py).
 - **Related but separate:** [`startup_batch`](../src/bioprocess_twin/simulator/startup_batch.py) augments state with **volume** and rain/evaporation (open-pond balance); full coupling with continuous-flow HRAP is future work per sprint notes.
 
 ## Data flow (high level)
@@ -38,6 +38,7 @@ flowchart TD
 |-------|----------|------|
 | State layout | [`core/state.py`](../src/bioprocess_twin/core/state.py) | `StateVector` SI components |
 | Diel drivers | [`forcing/diel_forcing_schedule.py`](../src/bioprocess_twin/forcing/diel_forcing_schedule.py) | $T(t)$, $I_0(t)$, optional $Q$, etc.; clock wraps modulo 24 h |
+| Light attenuation | [`simulator/beer_lambert.py`](../src/bioprocess_twin/simulator/beer_lambert.py) | Optional depth-averaged $\bar{I}$ from $I_0$, $\varepsilon$, $X_{ALG}$, mixed depth $h$; TSS proxy $X_{ALG}/1.57$ (SI 1.2) for documentation |
 | Liquid RHS (`evaluate_liquid_rhs`) | [`simulator/liquid_rhs.py`](../src/bioprocess_twin/simulator/liquid_rhs.py) | **Stage 6 — ODE hook-up:** ALBA process rates → $d\mathbf{C}/dt$; nested **pH** closure (Stages 1–5 upstream) |
 | ODE wrapper + CSTR | [`simulator/liquid_ode_rhs.py`](../src/bioprocess_twin/simulator/liquid_ode_rhs.py) | `LiquidOdeRhsProblem`, `evaluate_liquid_ode_rhs`, optional dilution |
 | Pure dilution algebra | [`simulator/cstr_transport.py`](../src/bioprocess_twin/simulator/cstr_transport.py) | $(Q/V)(\mathbf{y}_\mathrm{in}-\mathbf{y})$ |

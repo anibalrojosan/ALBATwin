@@ -1,7 +1,7 @@
 """
 Default kinetic parameters for ALBA (Casagli et al., 2021).
 
-Numeric values follow ``docs/MATH_MODEL.md`` §1.2 (nominal / midpoint where SI.5 gives ±).
+Numeric values follow MATH_MODEL.md §1.2 (nominal / midpoint where SI.5 gives ±).
 """
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -102,7 +102,7 @@ class KineticParameters(BaseModel):
 
 def default_alba() -> KineticParameters:
     """
-    Nominal parameters from ``MATH_MODEL.md`` §1.2 (central values; ignore ± in code).
+    Nominal parameters from MATH_MODEL.md §1.2 (central values; ignore ± in code).
 
     Cardinal T/pH use table centers only (e.g. −10, 20, 42 °C for algae).
     """

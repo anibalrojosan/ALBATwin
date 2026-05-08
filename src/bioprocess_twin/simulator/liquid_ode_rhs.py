@@ -16,9 +16,11 @@ from bioprocess_twin.forcing.diel_forcing_schedule import (
 )
 from bioprocess_twin.models.chemistry import AlbaDissociationConstantsRef, AlbaDissociationEnthalpy, PHSolverOptions
 from bioprocess_twin.models.gas_transfer import GasTransferConditions
-from bioprocess_twin.models.kinetic_parameters import KineticParameters
+from bioprocess_twin.models.kinetic_parameters import KineticParameters, default_alba
+from bioprocess_twin.models.kinetics import EnvConditions
 from bioprocess_twin.models.stoichiometry import N_STATE
 
+from .beer_lambert import env_irradiance_umol_m2_s
 from .cstr_transport import cstr_dilution_rate_g_m3_d, q_m3_per_day_from_m3_per_hour
 from .liquid_rhs import evaluate_liquid_rhs, state_vector_from_y
 
@@ -144,6 +146,10 @@ class LiquidOdeRhsProblem:
     Optional cstr adds (Q/V)(y_in - y) per day, aligned with dcdt_g_m3_d.
     Use CstrContinuousConfig for constant Q, or CstrScheduleFlowConfig so Q
     follows schedule inflow_m3_h (phase1-04c-C).
+
+    Optional mixed_layer_depth_m [m]: if set, EnvConditions.irradiance_umol_m2_s
+    uses depth-averaged Beer–Lambert PAR (phase1-04e); if None, surface PAR from
+    the schedule is unchanged.
     """
 
     schedule: DielForcingSchedule
@@ -157,6 +163,7 @@ class LiquidOdeRhsProblem:
     k_ref: AlbaDissociationConstantsRef | None = None
     dh: AlbaDissociationEnthalpy | None = None
     cstr: CstrTransportConfig | None = None
+    mixed_layer_depth_m: float | None = None
 
 
 def evaluate_liquid_ode_rhs(t_hours: float, y: np.ndarray, *, problem: LiquidOdeRhsProblem) -> np.ndarray:
@@ -172,10 +179,28 @@ def evaluate_liquid_ode_rhs(t_hours: float, y: np.ndarray, *, problem: LiquidOde
 
     If it is a CstrScheduleFlowConfig, Q comes from problem.schedule.at(t_hours)
     (inflow_m3_h → m³ d⁻¹); y_in may vary with wrapped clock time for callables.
+
+    If problem.mixed_layer_depth_m is set, EnvConditions.irradiance_umol_m2_s
+    uses depth-averaged Beer–Lambert PAR from surface $I_0(t)$ and $X_{ALG}$
+    (phase1-04e); otherwise surface irradiance from the schedule is used unchanged.
     """
     st = state_vector_from_y(y)
     sample = problem.schedule.at(t_hours)
-    env = to_env_conditions(sample, ph=problem.placeholder_ph_for_env)
+    params = problem.kinetic_parameters if problem.kinetic_parameters is not None else default_alba()
+    if problem.mixed_layer_depth_m is not None:
+        i_env = env_irradiance_umol_m2_s(
+            surface_irradiance_umol_m2_s=float(sample.irradiance_umol_m2_s),
+            epsilon_cod_m2_per_g=float(params.epsilon_light),
+            x_alg_g_cod_m3=float(st.X_ALG),
+            mixed_layer_depth_m=float(problem.mixed_layer_depth_m),
+        )
+        env = EnvConditions(
+            temperature_C=float(sample.temperature_C),
+            pH=float(problem.placeholder_ph_for_env),
+            irradiance_umol_m2_s=float(i_env),
+        )
+    else:
+        env = to_env_conditions(sample, ph=problem.placeholder_ph_for_env)
     out = evaluate_liquid_rhs(
         st,
         env,

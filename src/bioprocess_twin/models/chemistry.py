@@ -29,6 +29,7 @@ M_P = 31.0
 
 # --- Stage 1: foundations and unit conventions ---
 
+
 @dataclass(frozen=True, slots=True)
 class AlbaDissociationConstantsRef:
     """Dissociation constants at T_REF_K (298.15 K by default), in mol/L. Field names match SI.6.1."""
