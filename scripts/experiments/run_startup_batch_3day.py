@@ -167,6 +167,10 @@ def main(argv: list[str] | None = None) -> int:
 
     utc_iso = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    print(
+        "Simulation is running; this may take several minutes depending on horizon and hardware.",
+        flush=True,
+    )
     res, meta = run_startup_batch(cfg, t_eval_hours=t_eval, return_integration_metadata=True)
 
     df = trajectory_to_dataframe(res.t_hours, res.y, res.volume_m3)

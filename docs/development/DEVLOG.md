@@ -55,6 +55,7 @@ SciPy `solve_ivp` does not expose per-output-time CPU cost for a single run; spl
 ### Next Steps
 
 - Extend toward **phase1-04f** (export API, 24 h liquid-path E2E, mass-balance checks in CI) using the same CSV column naming.
+- Experiment with different tolerances and step sizes to see how they affect the performance of each simulation.
 
 ---
 
