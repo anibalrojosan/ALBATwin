@@ -91,8 +91,11 @@ class StartupBatchProblem:
     """
     Configuration for run_startup_batch.
 
-    Time span is [0, startup_days * 24) hours; DielForcingSchedule.at(t)
-    wraps clock time modulo 24 h so diurnal forcing repeats each simulated day.
+    Integration runs in **local** time over ``[0, startup_days * 24)`` h; returned ``t_hours``
+    add ``time_offset_hours`` so clock time matches continuation segments.
+
+    ``DielForcingSchedule.at(clock)`` uses clock time (local + offset); it wraps modulo 24 h
+    for diurnal curves.
     """
 
     problem: LiquidOdeRhsProblem
@@ -107,6 +110,9 @@ class StartupBatchProblem:
     volume_minimum_m3: float = 0.01
     """Integration stops (terminal event) if V reaches this level."""
 
+    time_offset_hours: float = 0.0
+    """Clock shift [h]: forcing and liquid RHS use ``t + time_offset_hours`` (continuation segments)."""
+
     def __post_init__(self) -> None:
         if self.startup_days <= 0:
             raise ValueError("startup_days must be positive")
@@ -118,6 +124,8 @@ class StartupBatchProblem:
             raise ValueError("evaporation_floor_m3_h must be non-negative")
         if self.volume_minimum_m3 <= 0:
             raise ValueError("volume_minimum_m3 must be positive")
+        if self.time_offset_hours < 0.0:
+            raise ValueError("time_offset_hours must be non-negative")
         _ = _as_length17_ndarray(self.y0)
 
 
@@ -165,7 +173,8 @@ def evaluate_startup_batch_rhs(
     """
     Augmented RHS for startup: return dz/dt with z = concat(y, [V]).
 
-    t_hours may exceed 24; forcing uses the schedule's modulo-24 convention.
+    ``t_hours`` is the integrator's local time in ``[0, startup_days * 24)``.
+    Forcing and biology use **clock time** ``t_hours + time_offset_hours``.
 
     Units: dz[:17]/dt in g m⁻³ h⁻¹; dz[17]/dt in m³ h⁻¹.
     """
@@ -181,7 +190,8 @@ def evaluate_startup_batch_rhs(
     v = float(z[_VOLUME_INDEX])
     v_safe = max(v, float(problem_cfg.volume_minimum_m3))
 
-    sample = problem_cfg.problem.schedule.at(t_hours)
+    t_clock = float(t_hours) + float(problem_cfg.time_offset_hours)
+    sample = problem_cfg.problem.schedule.at(t_clock)
     dVdt = volume_derivative_m3_h(
         sample,
         problem_cfg.surface_area_m2,
@@ -189,7 +199,7 @@ def evaluate_startup_batch_rhs(
         evaporation_floor_m3_h=problem_cfg.evaporation_floor_m3_h,
     )
 
-    dydt_day = evaluate_liquid_ode_rhs(t_hours, y, problem=problem_cfg.problem)
+    dydt_day = evaluate_liquid_ode_rhs(t_clock, y, problem=problem_cfg.problem)
     dydt_hour = np.asarray(dydt_day, dtype=np.float64) / _HOURS_PER_DAY
 
     # Concentration change due to volume change (same formula for all 17 SI components;
@@ -274,9 +284,12 @@ def run_startup_batch(
     return_integration_metadata: bool = False,
 ) -> StartupBatchResult | tuple[StartupBatchResult, StartupIntegrationMetadata]:
     """
-    Integrate startup batch (SI + volume) from t=0 to t = startup_days * 24 h.
+    Integrate startup batch (SI + volume) in **local** time from 0 to ``startup_days * 24`` h.
 
-    If t_eval_hours is None, samples every hour on [0, startup_days * 24].
+    Returned ``t_hours`` equals **simulated clock time**: local integration time plus
+    ``cfg.time_offset_hours`` (for continuation runs).
+
+    If t_eval_hours is None, samples every hour on [0, startup_days * 24] in local time.
 
     If ``return_integration_metadata`` is True, returns ``(result, metadata)`` where
     ``metadata.solver_wall_time_s`` covers only the ``solve_ivp`` call.
@@ -347,7 +360,8 @@ def run_startup_batch(
     v_traj = sol.y[_VOLUME_INDEX]
     msg = sol.message or ""
     ok = bool(sol.success)
-    th = np.asarray(sol.t, dtype=np.float64)
+    off = float(cfg.time_offset_hours)
+    th = np.asarray(sol.t, dtype=np.float64) + off
 
     res = StartupBatchResult(
         t_hours=th,

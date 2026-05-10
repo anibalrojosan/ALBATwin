@@ -26,6 +26,42 @@ def _rich_state() -> np.ndarray:
     return default_reasonable_startup_y0()
 
 
+def test_evaluate_startup_rhs_respects_time_offset_for_clock() -> None:
+    """RHS at local t with offset must match RHS at same clock time without offset."""
+    y = _rich_state()
+    v0 = 17.0
+    z = np.concatenate([y, np.array([v0])])
+    schedule = DielForcingSchedule(
+        season="summer",
+        evaporation_m3_h=0.0,
+        rain_mm_h=0.0,
+    )
+    problem = LiquidOdeRhsProblem(schedule=schedule)
+    cfg0 = StartupBatchProblem(
+        problem=problem,
+        startup_days=0.01,
+        y0=y,
+        volume_m3_initial=v0,
+        surface_area_m2=56.0,
+        include_rain=True,
+        time_offset_hours=0.0,
+    )
+    off = 33.6
+    cfg_off = StartupBatchProblem(
+        problem=problem,
+        startup_days=0.01,
+        y0=y,
+        volume_m3_initial=v0,
+        surface_area_m2=56.0,
+        include_rain=True,
+        time_offset_hours=off,
+    )
+    t_local = 2.5
+    out0 = evaluate_startup_batch_rhs(off + t_local, z, problem_cfg=cfg0)
+    out1 = evaluate_startup_batch_rhs(t_local, z, problem_cfg=cfg_off)
+    np.testing.assert_allclose(out0, out1, rtol=1e-12, atol=1e-12)
+
+
 def test_evaluate_startup_rhs_matches_base_when_dVdt_zero() -> None:
     """With E=0 and no rain, augmented derivative matches ALBA / 24 on y, dV=0."""
     y = _rich_state()
@@ -198,3 +234,22 @@ def test_run_startup_batch_integration_metadata() -> None:
     assert meta.n_output_points == res.t_hours.size == 4
     assert meta.solver_wall_time_s >= 0.0
     assert meta.nfev >= 0
+
+
+def test_run_startup_batch_shifts_t_hours_by_offset() -> None:
+    y = default_reasonable_startup_y0()
+    schedule = DielForcingSchedule(season="summer", evaporation_m3_h=0.0, rain_mm_h=0.0)
+    problem = LiquidOdeRhsProblem(schedule=schedule)
+    off = 10.0
+    cfg = StartupBatchProblem(
+        problem=problem,
+        startup_days=0.05,
+        y0=y,
+        volume_m3_initial=50.0,
+        surface_area_m2=56.0,
+        include_rain=False,
+        time_offset_hours=off,
+    )
+    te = np.array([0.0, 1.0])
+    res = run_startup_batch(cfg, t_eval_hours=te)
+    np.testing.assert_allclose(res.t_hours, te + off)

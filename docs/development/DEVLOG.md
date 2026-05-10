@@ -4,6 +4,7 @@ This document is a log of the development process of the project. It is used to 
 
 ## Index
 
+- [2026-05-09 - Sprint phase1-04f: Startup notebook — tolerances, timings, plots](#devlog-20260509-p104f-notebook-startup)
 - [2026-05-08 - Sprint phase1-04f: Startup batch 3-day experiment script and integration metadata](#devlog-20260508-p104f-startup-experiment)
 - [2026-05-08 - Sprint phase1-04e: Beer–Lambert and effective PAR (TSS proxy)](#devlog-20260508-p104e-beer-lambert)
 - [2026-05-07 - Sprint phase1-04d: Time integration (`integrate_liquid_ode`, DenseOutput, Etapa A–C)](#devlog-20260507-p104d-integrator)
@@ -29,6 +30,33 @@ This document is a log of the development process of the project. It is used to 
 - [2026-03-12 - Phase 1: Technical Specification & Architecture Definition](#devlog-20260312-phase1-spec-arch)
 - [2026-03-12 - Phase 1: ALBA Model Analysis & Data Digitization](#devlog-20260312-phase1-alba-digitization)
 - [2026-03-10 - Phase 0: Project Initialization and Foundation](#devlog-20260310-phase0-init)
+
+---
+
+<a id="devlog-20260509-p104f-notebook-startup"></a>
+
+## [2026-05-09] - Sprint phase1-04f: Startup notebook — tolerances, timings, plots
+
+### Context & Goals
+
+Stress-test the **startup batch** pathway interactively before freezing export APIs: verify that **multi-day** runs remain tractable under different **solver knobs**, capture **wall-clock** behaviour via integration metadata, and build **readable trajectory plots** (states, volume, forcing) including **post-hoc pH** from SI.6 charge balance. This closes the loop opened by the 3-day CLI experiment toward operator-facing diagnostics.
+
+### Technical Implementation
+
+- **`notebooks/startup_batch_experiment.ipynb`:** iterative runs with **`run_case`** / `run_startup_batch`, comparing **`rtol` / `atol`**, optional **`max_step`** / **`first_step`**, and **`t_eval`** density (hourly vs finer grids) to relate stiffness symptoms to tolerances without changing production defaults blindly.
+- **Timing:** use of **`StartupIntegrationMetadata`** (`solver_wall_time_s`, `nfev` / `njev` when available) to relate acceptance tolerances to observed cost on the **72 h** horizon.
+- **Plots:** overview panels for **dissolved oxygen**, **pH (charge-balance / SI.6)**, **Fig. 1 forcing** (e.g. $T$, PAR), and **volume** / dilution-relevant scalars for quick sanity checks against the seasonal schedule.
+- **Post-processing hygiene:** when rebuilding **`StateVector`** rows from stored trajectories for **`ph_series_for_trajectory`**, align nonnegative concentrations with the RHS clip (e.g. **`np.maximum(Y, 0.0)`**) so **Pydantic validation** does not fail on small negative numerical drift and pH traces stay defined.
+
+### 💡 Deep Dive: Why pH can look “wrong” or spiky on hourly traces
+
+SI.6 fixes **pH** implicitly via **electroneutrality** given totals and temperature; there is no stored **pH** in the 17-state vector. **`initial_ph`** in the liquid RHS is a **root-finder guess**, not a constraint that $t=0$ must be neutral at pH 7. Sharp hour-to-hour jumps in plotted pH often combine **nonlinear sensitivity** of the charge residual, **species totals** moving quickly in stiff windows, **nonnegative clipping** at reconstruction time, and **coarse sampling** of an underlying rapid change—so plots are a diagnostic, not a substitute for denser internal sampling when validating chemistry.
+
+### Next Steps
+
+- Decide **default integrator settings** for long startup batches (document trade-offs in **`SIMULATOR.md`** once settled).
+- Optional: denser **`t_eval`** or dense-output sampling **around** suspected stiff intervals when validating pH; revisit **initial totals** if visual **$t=0$** pH must match raceway-style nominal alkalinity.
+- Continue **phase1-04f** toward CSV/export hooks and CI mass-balance checks using the same column naming as the notebook.
 
 ---
 
